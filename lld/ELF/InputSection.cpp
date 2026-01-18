@@ -416,9 +416,23 @@ template <class ELFT> void InputSection::copyShtGroup(uint8_t *buf) {
   ArrayRef<InputSectionBase *> sections = file->getSections();
   DenseSet<uint32_t> seen;
   for (uint32_t idx : from.slice(1)) {
-    OutputSection *osec = sections[idx]->getOutputSection();
-    if (osec && seen.insert(osec->sectionIndex).second)
-      *to++ = osec->sectionIndex;
+    InputSectionBase *section = sections[idx];
+
+    // Skip discarded sections (member of duplicate COMDAT group)
+    if (section == &InputSection::discarded) {
+      continue;
+    }
+
+    // Skip nullptr sections (duplicate GROUP sections themselves)
+    if (!section) {
+      continue;
+    }
+
+    // Add valid sections to output
+    if (OutputSection *osec = section->getOutputSection()) {
+      if (seen.insert(osec->sectionIndex).second)
+        *to++ = osec->sectionIndex;
+    }
   }
 }
 

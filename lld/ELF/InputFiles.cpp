@@ -594,6 +594,15 @@ template <class ELFT> void ObjFile<ELFT>::parse(bool ignoreComdats) {
     if (LLVM_LIKELY(sec.sh_type == SHT_PROGBITS))
       continue;
     if (LLVM_LIKELY(sec.sh_type == SHT_GROUP)) {
+      if (i >= 76515 && i <= 76520) {
+        printf("!!! Found GROUP section at index %zu\n", i);
+        fflush(stdout);
+      }
+
+      // Count total groups and track if any reference 76519
+      static int totalGroups = 0;
+      static bool found76519InAnyGroup = false;
+      totalGroups++;
       StringRef signature = getShtGroupSignature(objSections, sec);
       ArrayRef<Elf_Word> entries =
           CHECK2(obj.template getSectionContentsAsArray<Elf_Word>(sec), this);
@@ -608,11 +617,118 @@ template <class ELFT> void ObjFile<ELFT>::parse(bool ignoreComdats) {
                        ctx.symtab->comdatGroups
                            .try_emplace(CachedHashStringRef(signature), this)
                            .second;
+
+      // Search for 76519 in ALL groups (kept or discarded)
+      bool found76519 = false;
+      for (uint32_t secIndex : entries.slice(1)) {
+        if (secIndex == 76519) {
+          found76519 = true;
+          printf("@@@ GROUP section %zu (%s) references 76519 (signature: %s, file: %s)\n",
+                 i, keepGroup ? "KEPT" : "DISCARDED",
+                 signature.str().c_str(), this->getName().str().c_str());
+          printf("@@@ All members:\n");
+          for (uint32_t memberIdx : entries.slice(1)) {
+            printf("@@@   %d\n", memberIdx);
+          }
+          fflush(stdout);
+          break;
+        }
+      }
+
+      // If this is the last GROUP we're checking and still no match
+      if (i == 76530 && !found76519) {
+        printf("!!! WARNING: Section 76519 has SHF_GROUP flag but is not a member of any nearby GROUP!\n");
+        printf("!!! This suggests object file malformation or compiler bug.\n");
+        fflush(stdout);
+      }
+
       if (keepGroup) {
         if (!ctx.arg.resolveGroups)
           sections[i] = createInputSection(
               i, sec, check(obj.getSectionName(sec, shstrtab)));
+
+        if (i == 76522) {
+          printf("*** GROUP section 76522 is KEPT (signature: %s, file: %s)\n",
+                 signature.str().c_str(), this->getName().str().c_str());
+          fflush(stdout);
+        }
+
+        // Check if this kept GROUP references 76522
+        // for (uint32_t secIndex : entries.slice(1)) {
+        //   if (secIndex == 76522) {
+        //     printf("*** FOUND: GROUP section %zu (KEPT) references section 76522 (signature: %s, file: %s)\n",
+        //            i, signature.str().c_str(), this->getName().str().c_str());
+        //     fflush(stdout);
+        //   }
+        // }
+
+        if (i == 76518) {
+          printf("*** GROUP 76518 raw data: flag=0x%x, entries.size()=%zu\n",
+                 flag, entries.size());
+          for (size_t j = 0; j < entries.size(); j++) {
+            printf("***   entries[%zu] = %u\n", j, entries[j]);
+          }
+          for (uint32_t secIndex : entries.slice(1)) {
+            printf("secIndex: %d\n", secIndex);
+            fflush(stdout);
+          }
+        }
+
+        // Check if any GROUP references 76519
+        for (uint32_t secIndex : entries.slice(1)) {
+          if (secIndex == 76519) {
+            printf("*** FOUND: GROUP section %zu (signature: %s) references section 76519\n",
+                   i, signature.str().c_str());
+            printf("*** All members of this group:\n");
+            for (uint32_t memberIdx : entries.slice(1)) {
+              printf("***   Member: %d\n", memberIdx);
+            }
+            fflush(stdout);
+          }
+        }
+
+        // Check GROUP 76516 specifically
+        if (i == 76516) {
+          printf("*** GROUP section 76516 (signature: %s) members:\n", signature.str().c_str());
+          for (uint32_t secIndex : entries.slice(1)) {
+            printf("***   Member: %d\n", secIndex);
+          }
+          fflush(stdout);
+        }
+
+        // Check any GROUP from 76510-76530
+        if (i >= 76510 && i <= 76530 && i % 2 == 0) {  // GROUP sections are typically even-numbered
+          printf("*** GROUP section %zu (signature: %s) has %zu members\n",
+                 i, signature.str().c_str(), entries.size() - 1);
+          if (i == 76526 || i == 76528 || i == 76530) {
+            printf("***   Members: ");
+            for (uint32_t memberIdx : entries.slice(1)) {
+              printf("%d ", memberIdx);
+            }
+            printf("\n");
+            fflush(stdout);
+          }
+        }
       } else {
+        // Check all discarded groups near 76519
+        if (i >= 76510 && i <= 76530) {
+          printf("*** GROUP section %zu is DISCARDED (signature: %s, members: ", i, signature.str().c_str());
+          for (uint32_t secIndex : entries.slice(1)) {
+            printf("%d ", secIndex);
+          }
+          printf(")\n");
+          fflush(stdout);
+        }
+
+        if (i == 76522) {
+          printf("*** (GROUP 76522 details: signature: %s, file: %s)\n",
+                 signature.str().c_str(), this->getName().str().c_str());
+          printf("*** Members being marked as discarded:\n");
+          for (uint32_t secIndex : entries.slice(1)) {
+            printf("***   Member: %d\n", secIndex);
+          }
+          fflush(stdout);
+        }
         // Otherwise, discard group members.
         for (uint32_t secIndex : entries.slice(1)) {
           if (secIndex >= size)

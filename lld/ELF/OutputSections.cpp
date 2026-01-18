@@ -627,9 +627,54 @@ static void finalizeShtGroup(Ctx &ctx, OutputSection *os,
   // new size. The content will be rewritten in InputSection::copyShtGroup.
   DenseSet<uint32_t> seen;
   ArrayRef<InputSectionBase *> sections = section->file->getSections();
-  for (const uint32_t &idx : section->getDataAs<uint32_t>().slice(1))
-    if (OutputSection *osec = sections[read32(ctx, &idx)]->getOutputSection())
-      seen.insert(osec->sectionIndex);
+  for (const uint32_t &idx : section->getDataAs<uint32_t>().slice(1)) {
+    uint32_t sectionIdx = read32(ctx, &idx);
+    // printf("idx: %d, sectionIdx: %d, sections.size(): %zu\n", idx, sectionIdx, sections.size());
+
+    if (sectionIdx >= sections.size()) {
+      printf("ERROR: sectionIdx %d out of bounds (size: %zu)\n", sectionIdx, sections.size());
+      continue;
+    }
+
+    InputSectionBase *section = sections[sectionIdx];
+
+    // Check if this is the discarded sentinel vs nullptr
+    if (section == &InputSection::discarded) {
+      // This is a discarded section member - skip it (normal for duplicate COMDAT groups)
+      printf("finalizeShtGroup: DISCARDED section at index %d (raw idx: %d)\n", sectionIdx, idx);
+      fflush(stdout);
+      continue;
+    }
+
+    if (section) {
+      if (OutputSection *osec = section->getOutputSection()) { // NOTE
+        seen.insert(osec->sectionIndex);
+      }
+    }
+    else {
+        // True nullptr - this is the GROUP section itself that wasn't kept
+        printf("finalizeShtGroup: section is nullptr at index %d (raw idx: %d)\n", sectionIdx, idx);
+        fflush(stdout);
+
+        // Debug: Let's see what sections are around this index
+        printf("  Nearby sections:\n");
+        for (int i = std::max(0, (int)sectionIdx - 6); i < std::min((int)sections.size(), (int)sectionIdx + 7); i++) {
+          if (sections[i] == &InputSection::discarded) {
+            printf("    [%d] <DISCARDED>\n", i);
+          } else if (sections[i]) {
+            std::string secName = sections[i]->name.str();
+            printf("    [%d] %s (kind=%d)\n", i, secName.c_str(), sections[i]->kind());
+            if (sections[i]->file) {
+                std::string fileName = sections[i]->file->getName().str();
+                printf("    File: %s\n", fileName.c_str());
+            }
+          } else {
+            printf("    [%d] <nullptr>\n", i);
+          }
+        }
+        fflush(stdout);
+    }
+  }
   os->size = (1 + seen.size()) * sizeof(uint32_t);
 }
 
