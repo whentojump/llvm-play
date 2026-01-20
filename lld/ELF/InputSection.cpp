@@ -416,9 +416,12 @@ template <class ELFT> void InputSection::copyShtGroup(uint8_t *buf) {
   ArrayRef<InputSectionBase *> sections = file->getSections();
   DenseSet<uint32_t> seen;
   for (uint32_t idx : from.slice(1)) {
-    OutputSection *osec = sections[idx]->getOutputSection();
-    if (osec && seen.insert(osec->sectionIndex).second)
-      *to++ = osec->sectionIndex;
+    InputSectionBase *section = sections[idx];
+    if (section) {
+        OutputSection *osec = section->getOutputSection();
+        if (osec && seen.insert(osec->sectionIndex).second)
+            *to++ = osec->sectionIndex;
+    }
   }
 }
 

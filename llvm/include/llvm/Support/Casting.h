@@ -653,7 +653,7 @@ template <typename To, typename From>
 
 template <typename To, typename From>
 [[nodiscard]] inline decltype(auto) dyn_cast(From *Val) {
-  assert(detail::isPresent(Val) && "dyn_cast on a non-existent value");
+  assert(detail::isPresent(Val) && "dyn_cast on a non-existent value"); // NOTE
   return CastInfo<To, From *>::doCastIfPossible(Val);
 }
 
