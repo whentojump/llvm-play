@@ -12,6 +12,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
@@ -43,6 +44,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/SMLoc.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Host.h"
 #include <cassert>
@@ -1053,6 +1055,45 @@ uint64_t ELFWriter::writeObject() {
       Members.second.push_back(Section.getOrdinal());
       if (RelSection)
         Members.second.push_back(RelSection->getOrdinal());
+    }
+  }
+
+  // Validation: Check for sections with SHF_GROUP flag that aren't in any group
+  // This detects compiler bugs where GROUP sections are created but members aren't added
+  if (!Groups.empty()) {
+    // Build a set of all sections that are in groups
+    DenseSet<unsigned> SectionsInGroups;
+    for (const auto &[Group, Members] : Groups) {
+      for (unsigned MemberOrdinal : Members) {
+        SectionsInGroups.insert(MemberOrdinal);
+      }
+    }
+
+    // Check all sections
+    for (MCSection &Sec : Asm) {
+      MCSectionELF &Section = static_cast<MCSectionELF &>(Sec);
+      if (Section.getOrdinal() == 0)
+        continue; // Not added to section table
+
+      // Check if section has SHF_GROUP flag but isn't in any group
+      if ((Section.getFlags() & ELF::SHF_GROUP) &&
+          !SectionsInGroups.contains(Section.getOrdinal())) {
+        StringRef SecName = Section.getName();
+        const MCSymbol *Group = Section.getGroup();
+
+        // Check if this is a coverage/profiling section (common source of this bug)
+        if (SecName.starts_with("__llvm_prf") || SecName.starts_with("__llvm_cov") ||
+            SecName.starts_with("__profc_") || SecName.starts_with("__profd_")) {
+          WithColor::warning()
+              << "Section '" << SecName << "' (ordinal " << Section.getOrdinal()
+              << ") has SHF_GROUP flag but is not in any GROUP section";
+          if (Group) {
+            WithColor::warning() << " (group symbol: " << Group->getName() << ")";
+          }
+          WithColor::warning() << "\n";
+          WithColor::note() << "This indicates a compiler bug in coverage instrumentation\n";
+        }
+      }
     }
   }
 
