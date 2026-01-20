@@ -18,6 +18,7 @@
 #include "Target.h"
 #include "lld/Common/DWARF.h"
 #include "llvm/ADT/CachedHashString.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Object/IRObjectFile.h"
@@ -682,6 +683,40 @@ template <class ELFT> void ObjFile<ELFT>::parse(bool ignoreComdats) {
           !canHaveMemtagGlobals(ctx))
         sections[i] = &InputSection::discarded;
       break;
+    }
+  }
+
+  // Validation: Check for orphaned sections (sections with SHF_GROUP but not in any group)
+  // This detects malformed object files from compiler bugs or broken intermediate links
+  {
+    // Build set of sections that are in groups
+    DenseSet<uint32_t> sectionsInGroups;
+    for (size_t i = 0; i != size; ++i) {
+      const Elf_Shdr &sec = objSections[i];
+      if (sec.sh_type == SHT_GROUP) {
+        ArrayRef<Elf_Word> entries =
+            CHECK2(obj.template getSectionContentsAsArray<Elf_Word>(sec), this);
+        for (uint32_t secIndex : entries.slice(1)) {
+          if (secIndex < size)
+            sectionsInGroups.insert(secIndex);
+        }
+      }
+    }
+
+    // Check for orphaned sections
+    for (size_t i = 0; i != size; ++i) {
+      const Elf_Shdr &sec = objSections[i];
+      if ((sec.sh_flags & SHF_GROUP) && !sectionsInGroups.contains(i)) {
+        StringRef name = check(obj.getSectionName(sec, shstrtab));
+        if (name.starts_with("__llvm_prf") || name.starts_with("__llvm_cov") ||
+            name.starts_with("__profc_") || name.starts_with("__profd_")) {
+          Warn(ctx) << getName() << ": section '" << name
+                    << "' (index " << i
+                    << ") has SHF_GROUP flag but is not in any GROUP section";
+          Warn(ctx) << "  This indicates object file malformation, likely from a "
+                       "compiler bug or broken intermediate link step";
+        }
+      }
     }
   }
 
