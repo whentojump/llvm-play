@@ -37,7 +37,7 @@
 // because FreeBSD's condvar.h (included by user.h) misuses the "thread"
 // keyword.
 #ifndef __FreeBSD__
-#include "llvm/Support/thread.h"
+// #include "llvm/Support/thread.h"
 #endif
 
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
@@ -47,6 +47,8 @@
 #include <sys/user.h>
 #include <unistd.h>
 #endif
+
+#include "llvm/Support/thread.h"
 
 #if defined(__NetBSD__)
 #include <lwp.h> // For _lwp_self()
